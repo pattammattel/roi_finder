@@ -86,6 +86,27 @@ def send_scan_plans(plans: list[dict]) -> None:
         print(plan)
 
 
+class RealCoordinateAxis(pg.AxisItem):
+    """Render axis tick labels in physical coordinates while keeping pixel-space data."""
+
+    def __init__(self, orientation: str, pixel_size_um: tuple[float, float] = (0.25, 0.25), origin_um: tuple[float, float] = (0.0, 0.0)):
+        super().__init__(orientation=orientation)
+        self.pixel_size_um = pixel_size_um
+        self.origin_um = origin_um
+
+    def set_scan_geometry(self, pixel_size_um: tuple[float, float], origin_um: tuple[float, float]) -> None:
+        self.pixel_size_um = pixel_size_um
+        self.origin_um = origin_um
+
+    def tickStrings(self, values, scale, spacing):
+        axis_index = 0 if self.orientation == "bottom" else 1
+        labels = []
+        for value in values:
+            world_coord = self.origin_um[axis_index] + value * self.pixel_size_um[axis_index]
+            labels.append(f"{world_coord:.2f}")
+        return labels
+
+
 class ROIViewBox(pg.ViewBox):
     """A ViewBox that creates a movable/resizable RectROI with a right-drag."""
 
@@ -196,9 +217,12 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.view_box.roiCreated.connect(self.add_roi)
         self.image_item = pg.ImageItem(axisOrder="row-major")
         self.view_box.addItem(self.image_item)
-        self.plot = pg.PlotWidget(viewBox=self.view_box, enableMenu=False)
-        self.plot.setLabel("bottom", "x", units="pixels")
-        self.plot.setLabel("left", "y", units="pixels")
+        self.x_axis = RealCoordinateAxis("bottom")
+        self.y_axis = RealCoordinateAxis("left")
+        self.plot = pg.PlotWidget(viewBox=self.view_box, enableMenu=False,
+                                 axisItems={"bottom": self.x_axis, "left": self.y_axis})
+        self.plot.setLabel("bottom", "x", units="µm")
+        self.plot.setLabel("left", "y", units="µm")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         image_layout.addWidget(self.plot, stretch=1)
         right.addWidget(image_box)
@@ -222,6 +246,8 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             self.scan = load_xrf_data_for_scan(raw_value)
             if self.scan.stack.ndim != 3 or self.scan.stack.shape[0] != len(self.scan.element_names):
                 raise ValueError("Expected XRF stack shape (n_elements, y, x) and matching names.")
+            self.x_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
+            self.y_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
             self.element_combo.blockSignals(True)
             self.element_combo.clear(); self.element_combo.addItems(self.scan.element_names)
             self.element_combo.blockSignals(False)
@@ -234,6 +260,8 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         if self.scan is None or index < 0:
             return
         self.image_item.setImage(self.scan.stack[index], autoLevels=True)
+        self.x_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
+        self.y_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
         self.view_box.autoRange()
 
     def add_roi(self, roi: pg.RectROI):
