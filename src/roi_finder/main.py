@@ -201,6 +201,15 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.send_button.setEnabled(False)
         form.addWidget(self.generate_button)
         form.addWidget(self.send_button)
+
+        info_group = QtWidgets.QGroupBox("Scan info")
+        info_layout = QtWidgets.QVBoxLayout(info_group)
+        self.scan_info_box = QtWidgets.QTextEdit()
+        self.scan_info_box.setReadOnly(True)
+        self.scan_info_box.setMinimumHeight(140)
+        self.scan_info_box.setPlainText("No scan loaded.\nUse a valid integer scan ID or 0000 for phantom data.")
+        info_layout.addWidget(self.scan_info_box)
+        form.addWidget(info_group)
         form.addStretch(1)
         layout.addWidget(controls)
 
@@ -238,6 +247,24 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         right.setSizes([560, 230])
         layout.addWidget(right, stretch=1)
 
+    def _update_scan_info(self):
+        if self.scan is None:
+            self.scan_info_box.setPlainText("No scan loaded.\nUse a valid integer scan ID or 0000 for phantom data.")
+            return
+
+        shape = self.scan.stack.shape
+        pixel_size_x, pixel_size_y = self.scan.pixel_size_um
+        origin_x, origin_y = self.scan.origin_um
+        text = (
+            f"Shape: {shape[2]} × {shape[1]} px\n"
+            f"Elements: {shape[0]}\n"
+            f"Element names: {', '.join(self.scan.element_names)}\n\n"
+            f"Pixel size: ({pixel_size_x:.3f}, {pixel_size_y:.3f}) µm\n"
+            f"Origin: ({origin_x:.3f}, {origin_y:.3f}) µm\n"
+            f"Field of view: ({shape[2] * pixel_size_x:.3f}, {shape[1] * pixel_size_y:.3f}) µm"
+        )
+        self.scan_info_box.setPlainText(text)
+
     def load_data(self):
         try:
             raw_value = self.scan_number.text().strip()
@@ -252,6 +279,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             self.element_combo.clear(); self.element_combo.addItems(self.scan.element_names)
             self.element_combo.blockSignals(False)
             self.clear_rois(); self.show_element(0)
+            self._update_scan_info()
             self.statusBar().showMessage(f"Loaded {self.scan.stack.shape[0]} elements; image size {self.scan.stack.shape[2]} × {self.scan.stack.shape[1]} px.")
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Could not load XRF data", str(exc))
@@ -263,6 +291,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.x_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
         self.y_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
         self.view_box.autoRange()
+        self._update_scan_info()
 
     def add_roi(self, roi: pg.RectROI):
         self.rois.append(roi)
