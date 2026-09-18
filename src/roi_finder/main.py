@@ -160,8 +160,8 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         load_group = QtWidgets.QGroupBox("Input")
         load_form = QtWidgets.QFormLayout(load_group)
         self.scan_number = QtWidgets.QLineEdit()
-        self.scan_number.setPlaceholderText('e.g. 123456 (use "0000" for phantom test data)')
-        self.scan_number.setValidator(QtGui.QIntValidator(0, 999999999, self))
+        self.scan_number.setPlaceholderText('e.g. 123456 or -1 (use "0000" for phantom test data)')
+        self.scan_number.setValidator(QtGui.QIntValidator(-999999999, 999999999, self))
         self.load_button = QtWidgets.QPushButton("Load XRF data")
         self.load_button.clicked.connect(self.load_data)
         load_form.addRow("Scan number", self.scan_number)
@@ -241,7 +241,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
     def load_data(self):
         try:
             raw_value = self.scan_number.text().strip()
-            if not raw_value or not raw_value.isdigit():
+            if not raw_value or (not raw_value.lstrip("-").isdigit()):
                 raise ValueError("Scan number must be an integer.")
             self.scan = load_xrf_data_for_scan(raw_value)
             if self.scan.stack.ndim != 3 or self.scan.stack.shape[0] != len(self.scan.element_names):
