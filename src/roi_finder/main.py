@@ -272,7 +272,11 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         shape = self.scan.stack.shape
         pixel_size_x, pixel_size_y = self.scan.pixel_size_um
         origin_x, origin_y = self.scan.origin_um
+        scan_input = getattr(self, "scan_input", None)
+        if scan_input is None:
+            scan_input = "n/a"
         text = (
+            f"Scan input: {scan_input}\n"
             f"Shape: {shape[2]} × {shape[1]} px\n"
             f"Elements: {shape[0]}\n"
             f"Element names: {', '.join(self.scan.element_names)}\n\n"
@@ -287,6 +291,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             raw_value = self.scan_number.text().strip()
             if not raw_value or (not raw_value.lstrip("-").isdigit()):
                 raise ValueError("Scan number must be an integer.")
+            self.scan_input = raw_value
             self.scan = load_xrf_data_for_scan(raw_value)
             if self.scan.stack.ndim != 3 or self.scan.stack.shape[0] != len(self.scan.element_names):
                 raise ValueError("Expected XRF stack shape (n_elements, y, x) and matching names.")
