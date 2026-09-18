@@ -84,36 +84,41 @@ def get_all_xrf_roi_data(hdr):
 def get_scan_details(hdr):
     start_doc = hdr.start
     param_dict = {"scan_id": start_doc.get("scan_id")}
-    # 2D_FLY_PANDA logic (original)
+
     if 'scan' in start_doc and start_doc['scan'].get('type') == '2D_FLY_PANDA':
-        df = db.get_table(hdr,stream_name = "baseline")
-        mots = start_doc['motors']
-        # Create a datetime object from the Unix time.
+        scan_cfg = start_doc.get('scan', {})
+        scan_input = scan_cfg.get('scan_input')
+        shape = scan_cfg.get('shape')
+
         datetime_object = datetime.datetime.fromtimestamp(start_doc["time"])
         formatted_time = datetime_object.strftime('%Y-%m-%d %H:%M:%S')
         param_dict["time"] = formatted_time
-        param_dict["motors"] = start_doc["motors"]
-        if "detectors" in start_doc.keys():
-            param_dict["detectors"] = start_doc["detectors"]
-            param_dict["scan_start1"] = start_doc["scan_start1"]
-            param_dict["num1"] = start_doc["num1"]
-            param_dict["scan_end1"] = start_doc["scan_end1"]
-            if len(mots)==2:
-                param_dict["scan_start2"] = start_doc["scan_start2"]
-                param_dict["scan_end2"] = start_doc["scan_end2"]
-                param_dict["num2"] = start_doc["num2"]
-            param_dict["exposure_time"] = start_doc["exposure_time"]
-        elif "scan" in start_doc.keys():
-            param_dict["scan"] = start_doc["scan"]
-        if 'zpsth' in df.columns:
-            param_dict["zp_theta"] = np.round(df.zpsth.iloc[0],3)
-        if 'dsth' in df.columns:
-            param_dict["mll_theta"] = np.round(df.dsth.iloc[0],3)
-        param_dict["energy"] = np.round(df.energy.iloc[0],3)
+        param_dict["motors"] = start_doc.get("motors", [])
+        param_dict["scan"] = scan_cfg
+
+        if isinstance(scan_input, (list, tuple)) and len(scan_input) >= 6:
+            param_dict["scan_start1"] = float(scan_input[0])
+            param_dict["scan_end1"] = float(scan_input[1])
+            param_dict["num1"] = int(scan_input[2])
+            param_dict["scan_start2"] = float(scan_input[3])
+            param_dict["scan_end2"] = float(scan_input[4])
+            param_dict["num2"] = int(scan_input[5])
+
+        if isinstance(shape, (list, tuple)) and len(shape) >= 2:
+            param_dict["shape"] = [int(shape[0]), int(shape[1])]
+
+        for key in ("zp_theta", "mll_theta", "energy"):
+            value = start_doc.get(key)
+            if value is not None:
+                param_dict[key] = float(value)
+
+        for key in ("detectors", "detector_distance", "dwell", "fast_axis", "slow_axis"):
+            if key in scan_cfg:
+                param_dict[key] = scan_cfg[key]
+
         return param_dict
-    # rel_scan logic
+
     elif start_doc.get('plan_name') == 'rel_scan':
-        # Basic info
         datetime_object = datetime.datetime.fromtimestamp(start_doc["time"])
         formatted_time = datetime_object.strftime('%Y-%m-%d %H:%M:%S')
         param_dict["time"] = formatted_time
@@ -129,10 +134,9 @@ def get_scan_details(hdr):
         param_dict["PI"] = start_doc.get("PI", None)
         param_dict["experimenters"] = start_doc.get("experimenters", None)
         param_dict["shape"] = start_doc.get("shape", None)
-        # Add any other relevant keys as needed
         return param_dict
+
     else:
-        print("[SCAN META] not all metadata was not exported; fallback option used")
         datetime_object = datetime.datetime.fromtimestamp(start_doc["time"])
         formatted_time = datetime_object.strftime('%Y-%m-%d %H:%M:%S')
         param_dict["time"] = formatted_time

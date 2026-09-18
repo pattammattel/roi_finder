@@ -16,7 +16,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from hxntools.CompositeBroker import db
 from hxntools.scan_info import get_scan_positions
 
-from xrf_utils import get_all_xrf_roi_data, get_scan_details
+try:
+    from .xrf_utils import get_all_xrf_roi_data, get_scan_details
+except ImportError:  # pragma: no cover - allows direct script execution
+    from xrf_utils import get_all_xrf_roi_data, get_scan_details
 
 
 @dataclass
