@@ -12,6 +12,8 @@ pyqtgraph = ">=0.13.4"
 numpy = ">=1.24"
 hxntools = ">=0.6.5,<0.7"
 ipython = ">=9.17.1,<10"
+bluesky-queueserver-api = ">=0.0.13,<0.0.14"
+bluesky-queueserver = ">=0.0.25,<0.0.26"
 
 [tasks]
 roi_finder = "python src/roi_finder/main.py"
