@@ -73,7 +73,7 @@ def load_xrf_data_for_scan(scan_number: str) -> XRFScan:
 
     else:
         print(f"Attempting to load scan {scan_number!r}...")
-        hdr = db[scan_number]
+        hdr = db[int(scan_number)]
         xrf_stack, element_names = get_all_xrf_roi_data(hdr)
         pixel_size_um, origin_um = _get_scan_geometry(get_scan_details(hdr))
         return XRFScan(xrf_stack, element_names, pixel_size_um, origin_um)
