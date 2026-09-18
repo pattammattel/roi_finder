@@ -48,14 +48,28 @@ def _make_phantom_xrf_scan() -> XRFScan:
 
 
 def _get_scan_geometry(details: dict) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Derive (pixel_size_um, origin_um) from get_scan_details() output."""
+    """Derive (pixel_size_um, origin_um) from the real scan metadata."""
+    scan_cfg = details.get("scan") if isinstance(details.get("scan"), dict) else {}
+    scan_input = scan_cfg.get("scan_input")
+    shape = scan_cfg.get("shape") or details.get("shape")
+
+    if isinstance(scan_input, (list, tuple)) and len(scan_input) >= 6:
+        start1 = float(scan_input[0]); end1 = float(scan_input[1]); num1 = int(scan_input[2])
+        start2 = float(scan_input[3]); end2 = float(scan_input[4]); num2 = int(scan_input[5])
+        if isinstance(shape, (list, tuple)) and len(shape) >= 2:
+            num1 = int(shape[0]) if int(shape[0]) > 0 else num1
+            num2 = int(shape[1]) if int(shape[1]) > 0 else num2
+        x_step = (end1 - start1) / max(num1 - 1, 1)
+        y_step = (end2 - start2) / max(num2 - 1, 1)
+        return (x_step, y_step), (start1, start2)
+
     if not all(key in details for key in ("scan_start1", "scan_end1", "num1")):
         return (0.25, 0.25), (0.0, 0.0)
 
-    x_step = (details["scan_end1"] - details["scan_start1"]) / max(details["num1"] - 1, 1)
+    x_step = (details["scan_end1"] - details["scan_start1"]) / max(int(details["num1"]) - 1, 1)
     origin_x = details["scan_start1"]
     if all(key in details for key in ("scan_start2", "scan_end2", "num2")):
-        y_step = (details["scan_end2"] - details["scan_start2"]) / max(details["num2"] - 1, 1)
+        y_step = (details["scan_end2"] - details["scan_start2"]) / max(int(details["num2"]) - 1, 1)
         origin_y = details["scan_start2"]
     else:
         y_step, origin_y = x_step, origin_x
