@@ -248,9 +248,14 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         image_controls.addStretch(1)
         image_layout.addLayout(image_controls)
         self.view_box = ROIViewBox(lockAspect=True, invertY=True)
+        self.view_box.setMouseTracking(True)
         self.view_box.roiCreated.connect(self.add_roi)
         self.image_item = pg.ImageItem(axisOrder="row-major")
         self.view_box.addItem(self.image_item)
+        self.hover_label = pg.TextItem(text="", color="w", fill="k")
+        self.hover_label.setVisible(False)
+        self.view_box.addItem(self.hover_label)
+        self.view_box.scene().sigMouseMoved.connect(self._update_hover_coordinates)
         self.x_axis = RealCoordinateAxis("bottom")
         self.y_axis = RealCoordinateAxis("left")
         self.plot = pg.PlotWidget(viewBox=self.view_box, enableMenu=False,
@@ -271,6 +276,24 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         right.addWidget(plan_box)
         right.setSizes([560, 230])
         layout.addWidget(right, stretch=1)
+
+    def _update_hover_coordinates(self, pos):
+        if self.scan is None:
+            self.hover_label.setVisible(False)
+            return
+        view_pos = self.view_box.mapSceneToView(pos)
+        x_px, y_px = view_pos.x(), view_pos.y()
+        if not (0 <= x_px < self.scan.stack.shape[2] and 0 <= y_px < self.scan.stack.shape[1]):
+            self.hover_label.setVisible(False)
+            return
+        px, py = self.scan.pixel_size_um
+        ox, oy = self.scan.origin_um
+        x_um = ox + x_px * px
+        y_um = oy + y_px * py
+        self.statusBar().showMessage(f"Cursor: x={x_um:.3f} µm, y={y_um:.3f} µm  |  px=({x_px:.1f}, {y_px:.1f})")
+        self.hover_label.setText(f"x={x_um:.2f} µm\ny={y_um:.2f} µm")
+        self.hover_label.setPos(x_px + 2, y_px + 2)
+        self.hover_label.setVisible(True)
 
     def _update_scan_info(self):
         if self.scan is None:
