@@ -79,6 +79,14 @@ def _get_scan_geometry(details: dict) -> tuple[tuple[float, float], tuple[float,
     return (x_step, y_step), (origin_x, origin_y)
 
 
+def _roi_padding_um(roi_size_px: tuple[float, float], pixel_size_um: tuple[float, float], padding_fraction: float) -> tuple[float, float]:
+    """Return padding in microns as a fraction of the ROI size."""
+    width_px, height_px = roi_size_px
+    pad_x_um = max(width_px, 0.0) * pixel_size_um[0] * max(padding_fraction, 0.0)
+    pad_y_um = max(height_px, 0.0) * pixel_size_um[1] * max(padding_fraction, 0.0)
+    return pad_x_um, pad_y_um
+
+
 def load_xrf_data_for_scan(scan_number: str) -> XRFScan:
     """HOOK: Load data for *scan_number* and return an ``XRFScan``.
 
@@ -205,10 +213,10 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         params = QtWidgets.QFormLayout(parameters)
         self.step_um = QtWidgets.QDoubleSpinBox(); self.step_um.setRange(0.001, 100); self.step_um.setValue(0.05); self.step_um.setSuffix(" µm")
         self.dwell_s = QtWidgets.QDoubleSpinBox(); self.dwell_s.setRange(0.0001, 100); self.dwell_s.setDecimals(4); self.dwell_s.setValue(0.01); self.dwell_s.setSuffix(" s")
-        self.padding_um = QtWidgets.QDoubleSpinBox(); self.padding_um.setRange(0, 100); self.padding_um.setValue(0.25); self.padding_um.setSuffix(" µm")
+        self.padding_pct = QtWidgets.QDoubleSpinBox(); self.padding_pct.setRange(0, 100); self.padding_pct.setDecimals(1); self.padding_pct.setSingleStep(0.5); self.padding_pct.setValue(10.0); self.padding_pct.setSuffix(" %")
         params.addRow("Step size", self.step_um)
         params.addRow("Dwell", self.dwell_s)
-        params.addRow("ROI padding", self.padding_um)
+        params.addRow("ROI padding", self.padding_pct)
         form.addWidget(parameters)
 
         self.generate_button = QtWidgets.QPushButton("Generate scan plans")
@@ -372,14 +380,18 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Load data and select at least one ROI.")
             return
         self.plans = []
-        px, py = self.scan.pixel_size_um; ox, oy = self.scan.origin_um; pad = self.padding_um.value()
+        px, py = self.scan.pixel_size_um; ox, oy = self.scan.origin_um
+        padding_fraction = self.padding_pct.value() / 100.0
         ny, nx = self.scan.stack.shape[1:]
         for i, roi in enumerate(self.rois, start=1):
             pos, size = roi.pos(), roi.size()
             x0 = max(0, pos.x()); x1 = min(nx, pos.x()+size.x())
             y0 = max(0, pos.y()); y1 = min(ny, pos.y()+size.y())
-            plan = {"roi": i, "x_start_um": ox + x0*px-pad, "x_stop_um": ox + x1*px+pad,
-                    "y_start_um": oy + y0*py-pad, "y_stop_um": oy + y1*py+pad,
+            roi_w_px = max(x1 - x0, 1.0)
+            roi_h_px = max(y1 - y0, 1.0)
+            pad_x_um, pad_y_um = _roi_padding_um((roi_w_px, roi_h_px), (px, py), padding_fraction)
+            plan = {"roi": i, "x_start_um": ox + x0*px-pad_x_um, "x_stop_um": ox + x1*px+pad_x_um,
+                    "y_start_um": oy + y0*py-pad_y_um, "y_stop_um": oy + y1*py+pad_y_um,
                     "step_um": self.step_um.value(), "dwell_s": self.dwell_s.value()}
             plan["num_x"] = max(2, round((plan["x_stop_um"]-plan["x_start_um"])/plan["step_um"])+1)
             plan["num_y"] = max(2, round((plan["y_stop_um"]-plan["y_start_um"])/plan["step_um"])+1)

@@ -1,9 +1,7 @@
-import pytest
-from src.roi_finder.core import some_function, SomeClass  # Replace with actual functions/classes to test
+from src.roi_finder.main import _roi_padding_um
 
-def test_some_function():
-    assert some_function() == expected_value  # Replace with actual test logic
 
-def test_some_class():
-    instance = SomeClass()
-    assert instance.some_method() == expected_result  # Replace with actual test logic
+def test_roi_padding_uses_relative_fraction_of_roi_size():
+    pad_x_um, pad_y_um = _roi_padding_um((100, 80), (0.25, 0.50), 0.10)
+    assert pad_x_um == 2.5
+    assert pad_y_um == 4.0
