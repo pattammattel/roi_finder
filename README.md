@@ -1,34 +1,66 @@
 # XRF ROI Scan Planner
 
-Run the prototype with Pixi:
+A small desktop tool for loading XRF image stacks, selecting regions of interest (ROIs), and generating scan plans from pixel-space boundaries.
+
+## Quick start
+
+This project is configured for Pixi:
 
 ```bash
 pixi install
 pixi run roi-planner
 ```
 
-`pixi.toml` pins a self-contained GUI environment (Python, PyQt6, pyqtgraph,
-and NumPy). The supplied `requirements.txt` is retained only as a pip fallback.
+You can also run the module entry point directly:
 
-Enter any scan number and click **Load XRF data**.  Until the data-access hook is
-connected, this loads a deterministic synthetic three-element XRF data set.
-
-* **Auto**: selects connected high-intensity regions from the displayed element.
-  Replace `find_rois` / `_component_boxes` with the production segmentation method.
-* **Manual**: right-drag on the image to create an ROI. ROIs can be moved or resized;
-  right-click an ROI to remove it.
-* **Generate scan plans**: converts ROI pixel bounds to sample coordinates using
-  `XRFScan.pixel_size_um` and `XRFScan.origin_um`, then previews dimensions and time.
-* **Send scans**: calls the isolated `send_scan_plans(plans)` hook.
-
-To connect beamline data, replace `load_xrf_data_for_scan`. It must return:
-
-```python
-XRFScan(stack=<numpy array shape (n_elements, y, x)>,
-        element_names=["Fe_K", "Cr_K", ...],
-        pixel_size_um=(x_pitch, y_pitch),
-        origin_um=(x_origin, y_origin))
+```bash
+pixi run gui
 ```
 
-This intentionally keeps the UI layer separate from databroker, pyxrf, or QueueServer
-so those APIs can be introduced without changing ROI interaction or plan generation.
+## Features
+
+- Load XRF data for a scan number
+- Display an element channel from a 3D XRF stack
+- Auto-detect candidate ROIs or draw ROIs manually
+- Adjust fine-scan parameters such as step size, dwell time, and padding
+- Generate scan-plan summaries from selected ROIs
+- Submit plans through a dedicated hook for beamline integration
+
+## Phantom data
+
+The app supports a built-in synthetic test dataset triggered by scan number `0000`. This is useful for testing the interface before connecting to real beamline data.
+
+## Project structure
+
+```text
+src/
+  roi_finder/
+    __init__.py
+    core.py
+    main.py
+    xrf_utils.py
+
+tests/
+  test_core.py
+```
+
+## Integration hooks
+
+Real beamline data can be connected by replacing the `load_xrf_data_for_scan` and `send_scan_plans` hooks in the GUI code. The expected return type is:
+
+```python
+XRFScan(
+    stack=<numpy array shape (n_elements, y, x)>,
+    element_names=["Fe_K", "Cr_K", ...],
+    pixel_size_um=(x_pitch, y_pitch),
+    origin_um=(x_origin, y_origin),
+)
+```
+
+The UI intentionally stays decoupled from databroker, pyxrf, and QueueServer so those dependencies can be introduced without changing the ROI interaction logic or plan-generation flow.
+
+## Notes
+
+- The project uses a `src/` package layout.
+- PyQt6, pyqtgraph, NumPy, and hxntools are managed via Pixi.
+- This repository is intended as a prototype and integration layer for future beamline-specific data access.
