@@ -11,6 +11,7 @@ pyqt6 = "*"
 pyqtgraph = ">=0.13.4"
 numpy = ">=1.24"
 hxntools = ">=0.6.5,<0.7"
+ipython = ">=9.17.1,<10"
 
 [tasks]
 roi_finder = "python src/roi_finder/main.py"
