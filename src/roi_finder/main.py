@@ -111,7 +111,7 @@ def send_scan_plans(plans: list[dict], sid: str | int | None = None,
     if sid is None:
         raise ValueError("Scan ID is required to recover the motor positions before the fly scan.")
 
-    detector_names = dets if isinstance(dets, str) else list(dets) if dets is not None else []
+    detector_names = [detector.name for detector in eval(dets)]
 
     for plan in plans:
         send_fly2d_recover_and_scan(
