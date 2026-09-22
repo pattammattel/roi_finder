@@ -16,10 +16,9 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from hxntools.CompositeBroker import db
 from hxntools.scan_info import get_scan_positions
 
-try:
-    from .xrf_utils import get_all_xrf_roi_data, get_scan_details
-except ImportError:  # pragma: no cover - allows direct script execution
-    from xrf_utils import get_all_xrf_roi_data, get_scan_details
+from .qserver_utils import send_fly2d_recover_and_scan
+from .xrf_utils import get_all_xrf_roi_data, get_scan_details
+
 
 
 @dataclass
@@ -103,12 +102,32 @@ def load_xrf_data_for_scan(scan_number: str) -> XRFScan:
         pixel_size_um, origin_um = _get_scan_geometry(get_scan_details(hdr))
         return XRFScan(xrf_stack, element_names, pixel_size_um, origin_um)
 
-def send_scan_plans(plans: list[dict]) -> None:
-    """HOOK: Submit *plans* to QueueServer (or write them to your queue)."""
-    # Example: REManagerAPI(...).item_add({"name": "fly2d", "args": ...})
-    print("Plans ready for submission:")
+def send_scan_plans(plans: list[dict], sid: str | int | None = None,
+                   dets: str | list[str] | None = None,
+                   mot1: str = "zpssx", mot2: str = "zpssy") -> None:
+    """Submit generated ROI plans through the queue-server recovery + fly2d plan."""
+    if not plans:
+        return
+    if sid is None:
+        raise ValueError("Scan ID is required to recover the motor positions before the fly scan.")
+
+    detector_names = dets if isinstance(dets, str) else list(dets) if dets is not None else []
+
     for plan in plans:
-        print(plan)
+        send_fly2d_recover_and_scan(
+            label=f"roi_{plan['roi']}",
+            roi_positions=int(sid),
+            dets=detector_names,
+            mot1=mot1,
+            mot1_s=plan["x_start_um"],
+            mot1_e=plan["x_stop_um"],
+            mot1_n=plan["num_x"],
+            mot2=mot2,
+            mot2_s=plan["y_start_um"],
+            mot2_e=plan["y_stop_um"],
+            mot2_n=plan["num_y"],
+            exp_t=plan["dwell_s"],
+        )
 
 
 class RealCoordinateAxis(pg.AxisItem):
@@ -214,9 +233,13 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.step_um = QtWidgets.QDoubleSpinBox(); self.step_um.setRange(0.001, 100); self.step_um.setValue(0.05); self.step_um.setSuffix(" µm")
         self.dwell_s = QtWidgets.QDoubleSpinBox(); self.dwell_s.setRange(0.0001, 100); self.dwell_s.setDecimals(4); self.dwell_s.setValue(0.01); self.dwell_s.setSuffix(" s")
         self.padding_pct = QtWidgets.QDoubleSpinBox(); self.padding_pct.setRange(0, 100); self.padding_pct.setDecimals(1); self.padding_pct.setSingleStep(0.5); self.padding_pct.setValue(10.0); self.padding_pct.setSuffix(" %")
+        self.detector_system = QtWidgets.QComboBox()
+        self.detector_system.addItems(["dets_fast", "dets_fast_merlin", "dets_fast_fs"])
+        self.detector_system.setCurrentText("dets_fast")
         params.addRow("Step size", self.step_um)
         params.addRow("Dwell", self.dwell_s)
         params.addRow("ROI padding", self.padding_pct)
+        params.addRow("Detector system", self.detector_system)
         form.addWidget(parameters)
 
         self.generate_button = QtWidgets.QPushButton("Generate scan plans")
@@ -433,7 +456,13 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
 
     def send_plans(self):
         try:
-            send_scan_plans(self.plans)
+            send_scan_plans(
+                self.plans,
+                sid=self.scan_input if hasattr(self, "scan_input") else None,
+                dets=self.detector_system.currentText(),
+                mot1="zpssx",
+                mot2="zpssy",
+            )
             self.statusBar().showMessage(f"Submitted {len(self.plans)} plan(s).")
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Could not send plans", str(exc))
