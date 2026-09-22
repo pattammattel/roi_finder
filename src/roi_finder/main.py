@@ -271,7 +271,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         image_controls.addStretch(1)
         image_layout.addLayout(image_controls)
         self.view_box = ROIViewBox(lockAspect=True, invertY=True)
-        self.view_box.setMouseTracking(True)
+        self.view_box.scene().setMouseTracking(True)
         self.view_box.roiCreated.connect(self.add_roi)
         self.image_item = pg.ImageItem(axisOrder="row-major")
         self.view_box.addItem(self.image_item)
