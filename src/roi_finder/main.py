@@ -277,7 +277,6 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.hover_label = pg.TextItem(text="", color="w", fill="k")
         self.hover_label.setVisible(False)
         self.view_box.addItem(self.hover_label)
-        self.view_box.scene().sigMouseMoved.connect(self._update_hover_coordinates)
         self.x_axis = RealCoordinateAxis("bottom")
         self.y_axis = RealCoordinateAxis("left")
         self.plot = pg.PlotWidget(viewBox=self.view_box, enableMenu=False,
@@ -285,6 +284,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.plot.setLabel("bottom", "x", units="µm")
         self.plot.setLabel("left", "y", units="µm")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
+        self.plot.scene().sigMouseMoved.connect(self._update_hover_coordinates)
         image_layout.addWidget(self.plot, stretch=1)
         right.addWidget(image_box)
 
