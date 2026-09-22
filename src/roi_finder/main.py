@@ -16,8 +16,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from hxntools.CompositeBroker import db
 from hxntools.scan_info import get_scan_positions
 
-from .qserver_utils import send_fly2d_recover_and_scan
-from .xrf_utils import get_all_xrf_roi_data, get_scan_details
+from qserver_utils import send_fly2d_recover_and_scan
+from xrf_utils import get_all_xrf_roi_data, get_scan_details
 
 
 
