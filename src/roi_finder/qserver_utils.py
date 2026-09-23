@@ -57,7 +57,9 @@ def send_fly2d_recover_and_scan(
     zp_flag=True,
 ):
     if isinstance(dets, str):
-        det_names = [str(detector.name) for detector in eval(dets)]
+        det_names = [dets]
+    elif dets is None:
+        det_names = []
     else:
         det_names = [detector.name if hasattr(detector, "name") else str(detector) for detector in dets]
     mot1_name = mot1 if isinstance(mot1, str) else mot1.name
