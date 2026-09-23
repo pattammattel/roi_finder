@@ -111,13 +111,11 @@ def send_scan_plans(plans: list[dict], sid: str | int | None = None,
     if sid is None:
         raise ValueError("Scan ID is required to recover the motor positions before the fly scan.")
 
-    detector_names = [detector.name for detector in eval(dets)]
-
     for plan in plans:
         send_fly2d_recover_and_scan(
             label=f"roi_{plan['roi']}",
             roi_positions=int(sid),
-            dets=detector_names,
+            dets=dets,
             mot1=mot1,
             mot1_s=plan["x_start_um"],
             mot1_e=plan["x_stop_um"],
