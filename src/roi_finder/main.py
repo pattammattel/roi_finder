@@ -79,7 +79,7 @@ def _plan_range_status(plan: dict, limit_um: float = SCANNER_RANGE_LIMIT_UM, max
     if not _plan_within_scanner_limits(plan, limit_um=limit_um):
         return f"Outside ±{limit_um:.0f} µm"
     if not _plan_within_point_limit(plan, max_points=max_points):
-        return f"Too many points (> {max_points:,})"
+        return f"Too many points (> {max_points:,}); increase step size"
     return "OK"
 
 
