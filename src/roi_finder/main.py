@@ -33,6 +33,9 @@ class XRFScan:
 
 PHANTOM_SCAN_NUMBER = "0000"
 SCANNER_RANGE_LIMIT_UM = 14.0
+MAX_SCAN_POINTS = 64_000
+MANUAL_ROI_COLOR = "#ff4fd8"
+AUTO_ROI_COLOR = "#ff6b6b"
 
 PLAN_TABLE_COLUMNS = [
     "Use",
@@ -60,10 +63,24 @@ def _plan_within_scanner_limits(plan: dict, limit_um: float = SCANNER_RANGE_LIMI
     )
 
 
-def _plan_range_status(plan: dict, limit_um: float = SCANNER_RANGE_LIMIT_UM) -> str:
-    if _plan_within_scanner_limits(plan, limit_um=limit_um):
-        return "OK"
-    return f"Outside ±{limit_um:.0f} µm"
+def _plan_total_points(plan: dict) -> int:
+    return int(plan.get("num_x", 0)) * int(plan.get("num_y", 0))
+
+
+def _plan_within_point_limit(plan: dict, max_points: int = MAX_SCAN_POINTS) -> bool:
+    return _plan_total_points(plan) <= max_points
+
+
+def _plan_is_valid(plan: dict, limit_um: float = SCANNER_RANGE_LIMIT_UM, max_points: int = MAX_SCAN_POINTS) -> bool:
+    return _plan_within_scanner_limits(plan, limit_um=limit_um) and _plan_within_point_limit(plan, max_points=max_points)
+
+
+def _plan_range_status(plan: dict, limit_um: float = SCANNER_RANGE_LIMIT_UM, max_points: int = MAX_SCAN_POINTS) -> str:
+    if not _plan_within_scanner_limits(plan, limit_um=limit_um):
+        return f"Outside ±{limit_um:.0f} µm"
+    if not _plan_within_point_limit(plan, max_points=max_points):
+        return f"Too many points (> {max_points:,})"
+    return "OK"
 
 
 def _make_phantom_xrf_scan() -> XRFScan:
@@ -143,10 +160,10 @@ def send_scan_plans(plans: list[dict], sid: str | int | None = None,
     if sid is None:
         raise ValueError("Scan ID is required to recover the motor positions before the fly scan.")
 
-    invalid_rois = [str(plan.get("roi", "?")) for plan in plans if not _plan_within_scanner_limits(plan)]
+    invalid_rois = [str(plan.get("roi", "?")) for plan in plans if not _plan_is_valid(plan)]
     if invalid_rois:
         raise ValueError(
-            "Selected scan plan(s) exceed the ±14 µm scanner limit: " + ", ".join(invalid_rois)
+            "Selected scan plan(s) violate scanner limits or point limits: " + ", ".join(invalid_rois)
         )
 
     for plan in plans:
@@ -201,7 +218,7 @@ class ROIViewBox(pg.ViewBox):
             w, h = abs(current.x() - start.x()), abs(current.y() - start.y())
             if event.isStart():
                 self._drawing_roi = pg.RectROI((x0, y0), (0.1, 0.1),
-                                                pen=pg.mkPen("#00d8ff", width=2),
+                                                pen=pg.mkPen(MANUAL_ROI_COLOR, width=2),
                                                 removable=True)
                 self.addItem(self._drawing_roi)
             if hasattr(self, "_drawing_roi"):
@@ -316,6 +333,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         image_controls.addWidget(self.element_combo)
         image_controls.addStretch(1)
         image_layout.addLayout(image_controls)
+        image_display = QtWidgets.QHBoxLayout()
         self.view_box = ROIViewBox(lockAspect=True, invertY=True)
         self.view_box.roiCreated.connect(self.add_roi)
         self.image_item = pg.ImageItem(axisOrder="row-major")
@@ -331,7 +349,15 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.plot.setLabel("left", "y", units="µm")
         self.plot.showGrid(x=True, y=True, alpha=0.2)
         self.plot.scene().sigMouseMoved.connect(self._update_hover_coordinates)
-        image_layout.addWidget(self.plot, stretch=1)
+        self.image_histogram = pg.HistogramLUTWidget()
+        self.image_histogram.setImageItem(self.image_item)
+        self.image_histogram.setMaximumWidth(140)
+        viridis = pg.colormap.get("viridis")
+        self.image_item.setColorMap(viridis)
+        self.image_histogram.gradient.setColorMap(viridis)
+        image_display.addWidget(self.plot, stretch=1)
+        image_display.addWidget(self.image_histogram)
+        image_layout.addLayout(image_display, stretch=1)
         right.addWidget(image_box)
 
         plan_box = QtWidgets.QWidget(); plan_layout = QtWidgets.QVBoxLayout(plan_box)
@@ -469,7 +495,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         plan["num_x"] = max(2, round(span_x_um / max(step_um, 1e-12)) + 1)
         plan["num_y"] = max(2, round(span_y_um / max(step_um, 1e-12)) + 1)
         plan["estimated_s"] = plan["num_x"] * plan["num_y"] * dwell_s
-        plan["within_limits"] = _plan_within_scanner_limits(plan)
+        plan["within_limits"] = _plan_is_valid(plan)
         plan["range_status"] = _plan_range_status(plan)
         return plan, errors
 
@@ -581,7 +607,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         threshold = np.nanpercentile(image, 92)
         mask = np.isfinite(image) & (image >= threshold)
         for x, y, w, h in self._component_boxes(mask, min_pixels=40):
-            roi = pg.RectROI((x, y), (w, h), pen=pg.mkPen("#ffb000", width=2), removable=True)
+            roi = pg.RectROI((x, y), (w, h), pen=pg.mkPen(AUTO_ROI_COLOR, width=2), removable=True)
             self.view_box.addItem(roi); self.add_roi(roi)
         self.auto_radio.setChecked(True)
         self.statusBar().showMessage(f"Found {len(self.rois)} ROI(s) from {self.element_combo.currentText()}.")
@@ -625,14 +651,14 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             plan["num_y"] = max(2, round((plan["y_stop_um"]-plan["y_start_um"])/plan["step_um"])+1)
             plan["estimated_s"] = plan["num_x"]*plan["num_y"]*plan["dwell_s"]
             plan["selected"] = preserved_selection[i - 1] if i - 1 < len(preserved_selection) else True
-            plan["within_limits"] = _plan_within_scanner_limits(plan)
+            plan["within_limits"] = _plan_is_valid(plan)
             plan["range_status"] = _plan_range_status(plan)
             self.plans.append(plan)
         self._show_plans()
         invalid_count = sum(1 for plan in self.plans if not plan["within_limits"])
         if invalid_count:
             self.statusBar().showMessage(
-                f"Generated {len(self.plans)} scan plan(s); {invalid_count} exceed the ±{SCANNER_RANGE_LIMIT_UM:.0f} µm scanner limit."
+                f"Generated {len(self.plans)} scan plan(s); {invalid_count} exceed the scan limits or the {MAX_SCAN_POINTS:,} point cap."
             )
         else:
             self.statusBar().showMessage(f"Generated {len(self.plans)} scan plan(s).")
@@ -670,7 +696,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
                 invalid_messages.extend(errors)
                 continue
             if not plan["within_limits"]:
-                invalid_messages.append(f"ROI {plan['roi']}: exceeds the ±{SCANNER_RANGE_LIMIT_UM:.0f} µm scanner limit")
+                invalid_messages.append(f"ROI {plan['roi']}: {plan['range_status']}")
                 continue
             plans.append(plan)
 
