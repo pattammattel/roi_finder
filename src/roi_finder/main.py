@@ -33,6 +33,12 @@ class XRFScan:
 
 PHANTOM_SCAN_NUMBER = "0000"
 
+DETECTOR_PRESETS = {
+    "dets_fast": ["fs", "eiger2", "xspress3"],
+    "dets_fast_merlin": ["fs", "xspress3", "merlin1", "eiger2"],
+    "dets_fast_fs": ["fs", "xspress3"],
+}
+
 
 def _make_phantom_xrf_scan() -> XRFScan:
     """Build a reproducible three-element phantom stack for testing the GUI."""
@@ -454,10 +460,12 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
     def send_plans(self):
 
         try:
+            chosen = self.detector_system.currentText()
+            dets = DETECTOR_PRESETS.get(chosen, [])
             send_scan_plans(
                 self.plans,
                 sid=self.scan_input if hasattr(self, "scan_input") else None,
-                dets=self.detector_system.currentText(),
+                dets=dets,
                 mot1="zpssx",
                 mot2="zpssy",
             )
