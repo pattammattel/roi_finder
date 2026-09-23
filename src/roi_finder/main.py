@@ -452,6 +452,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             for col, value in enumerate(values): self.plan_table.setItem(row, col, QtWidgets.QTableWidgetItem(str(value)))
 
     def send_plans(self):
+
         try:
             send_scan_plans(
                 self.plans,
@@ -461,8 +462,13 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
                 mot2="zpssy",
             )
             self.statusBar().showMessage(f"Submitted {len(self.plans)} plan(s).")
-        except Exception as exc:
-            QtWidgets.QMessageBox.critical(self, "Could not send plans", str(exc))
+        except Exception:
+            import traceback
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Could not send plans",
+                traceback.format_exc(),
+            )
 
 
 if __name__ == "__main__":
