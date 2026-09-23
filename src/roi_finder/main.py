@@ -32,12 +32,38 @@ class XRFScan:
 
 
 PHANTOM_SCAN_NUMBER = "0000"
+SCANNER_RANGE_LIMIT_UM = 14.0
+
+PLAN_TABLE_COLUMNS = [
+    "Use",
+    "ROI",
+    "x start",
+    "x stop",
+    "y start",
+    "y stop",
+    "points (x, y)",
+    "est. time",
+    "range",
+]
 
 DETECTOR_PRESETS = {
     "dets_fast": ["fs", "eiger2", "xspress3"],
     "dets_fast_merlin": ["fs", "xspress3", "merlin1", "eiger2"],
     "dets_fast_fs": ["fs", "xspress3"],
 }
+
+
+def _plan_within_scanner_limits(plan: dict, limit_um: float = SCANNER_RANGE_LIMIT_UM) -> bool:
+    return all(
+        abs(float(plan[key])) <= limit_um
+        for key in ("x_start_um", "x_stop_um", "y_start_um", "y_stop_um")
+    )
+
+
+def _plan_range_status(plan: dict, limit_um: float = SCANNER_RANGE_LIMIT_UM) -> str:
+    if _plan_within_scanner_limits(plan, limit_um=limit_um):
+        return "OK"
+    return f"Outside ±{limit_um:.0f} µm"
 
 
 def _make_phantom_xrf_scan() -> XRFScan:
@@ -117,6 +143,12 @@ def send_scan_plans(plans: list[dict], sid: str | int | None = None,
     if sid is None:
         raise ValueError("Scan ID is required to recover the motor positions before the fly scan.")
 
+    invalid_rois = [str(plan.get("roi", "?")) for plan in plans if not _plan_within_scanner_limits(plan)]
+    if invalid_rois:
+        raise ValueError(
+            "Selected scan plan(s) exceed the ±14 µm scanner limit: " + ", ".join(invalid_rois)
+        )
+
     for plan in plans:
         send_fly2d_recover_and_scan(
             label=f"roi_{plan['roi']}",
@@ -193,6 +225,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.resize(1320, 820)
         self.scan: XRFScan | None = None
         self.rois: list[pg.RectROI] = []
+        self.plans: list[dict] = []
         self._build_ui()
         self.statusBar().showMessage("Enter a scan number and click Load XRF data.")
 
@@ -244,14 +277,23 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         params.addRow("Dwell", self.dwell_s)
         params.addRow("ROI padding", self.padding_pct)
         params.addRow("Detector system", self.detector_system)
+        self.auto_update_table = QtWidgets.QCheckBox("Auto-update table when parameters change")
+        self.auto_update_table.setChecked(False)
+        params.addRow(self.auto_update_table)
+        self.step_um.valueChanged.connect(self._on_scan_param_changed)
+        self.dwell_s.valueChanged.connect(self._on_scan_param_changed)
+        self.padding_pct.valueChanged.connect(self._on_scan_param_changed)
         form.addWidget(parameters)
 
         self.generate_button = QtWidgets.QPushButton("Generate scan plans")
         self.generate_button.clicked.connect(self.generate_plans)
+        self.update_button = QtWidgets.QPushButton("Update table from params")
+        self.update_button.clicked.connect(self.generate_plans)
         self.send_button = QtWidgets.QPushButton("Send scans")
         self.send_button.clicked.connect(self.send_plans)
         self.send_button.setEnabled(False)
         form.addWidget(self.generate_button)
+        form.addWidget(self.update_button)
         form.addWidget(self.send_button)
 
         info_group = QtWidgets.QGroupBox("Scan info")
@@ -294,10 +336,11 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
 
         plan_box = QtWidgets.QWidget(); plan_layout = QtWidgets.QVBoxLayout(plan_box)
         plan_layout.addWidget(QtWidgets.QLabel("Generated scan plans"))
-        self.plan_table = QtWidgets.QTableWidget(0, 7)
-        self.plan_table.setHorizontalHeaderLabels(["ROI", "x start", "x stop", "y start", "y stop", "points (x, y)", "est. time"])
+        self.plan_table = QtWidgets.QTableWidget(0, len(PLAN_TABLE_COLUMNS))
+        self.plan_table.setHorizontalHeaderLabels(PLAN_TABLE_COLUMNS)
         self.plan_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.plan_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.plan_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.AllEditTriggers)
+        self.plan_table.itemChanged.connect(self._on_plan_table_item_changed)
         plan_layout.addWidget(self.plan_table)
         right.addWidget(plan_box)
         right.setSizes([560, 230])
@@ -343,6 +386,139 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         )
         self.scan_info_box.setPlainText(text)
 
+    def _on_scan_param_changed(self, *_):
+        if self.auto_update_table.isChecked():
+            self.generate_plans()
+        elif self.plan_table.rowCount() > 0:
+            self.statusBar().showMessage("Parameters changed. Use Update table from params to refresh the plans.")
+
+    def _plan_selection_states(self) -> list[bool]:
+        states: list[bool] = []
+        for row in range(self.plan_table.rowCount()):
+            item = self.plan_table.item(row, 0)
+            states.append(item is not None and item.checkState() == QtCore.Qt.CheckState.Checked)
+        return states
+
+    def _make_plan_item(self, text: str, *, editable: bool = False, checkable: bool = False, checked: bool = True) -> QtWidgets.QTableWidgetItem:
+        item = QtWidgets.QTableWidgetItem(text)
+        flags = QtCore.Qt.ItemFlag.ItemIsSelectable | QtCore.Qt.ItemFlag.ItemIsEnabled
+        if editable:
+            flags |= QtCore.Qt.ItemFlag.ItemIsEditable
+        if checkable:
+            flags |= QtCore.Qt.ItemFlag.ItemIsUserCheckable
+        item.setFlags(flags)
+        if checkable:
+            item.setCheckState(QtCore.Qt.CheckState.Checked if checked else QtCore.Qt.CheckState.Unchecked)
+        return item
+
+    @staticmethod
+    def _parse_float_item(item: QtWidgets.QTableWidgetItem | None) -> float | None:
+        if item is None:
+            return None
+        text = item.text().replace("µm", "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _plan_from_row(self, row: int) -> tuple[dict, list[str]]:
+        errors: list[str] = []
+
+        roi_item = self.plan_table.item(row, 1)
+        roi_text = roi_item.text().strip() if roi_item is not None else str(row + 1)
+        try:
+            roi_index = int(roi_text)
+        except ValueError:
+            roi_index = row + 1
+            errors.append(f"ROI {row + 1}: invalid ROI label {roi_text!r}")
+
+        x_start = self._parse_float_item(self.plan_table.item(row, 2))
+        x_stop = self._parse_float_item(self.plan_table.item(row, 3))
+        y_start = self._parse_float_item(self.plan_table.item(row, 4))
+        y_stop = self._parse_float_item(self.plan_table.item(row, 5))
+        step_um = self.step_um.value()
+        dwell_s = self.dwell_s.value()
+
+        selected_item = self.plan_table.item(row, 0)
+        selected = selected_item is not None and selected_item.checkState() == QtCore.Qt.CheckState.Checked
+
+        plan = {
+            "roi": roi_index,
+            "selected": selected,
+            "step_um": step_um,
+            "dwell_s": dwell_s,
+            "x_start_um": x_start if x_start is not None else 0.0,
+            "x_stop_um": x_stop if x_stop is not None else 0.0,
+            "y_start_um": y_start if y_start is not None else 0.0,
+            "y_stop_um": y_stop if y_stop is not None else 0.0,
+        }
+
+        if None in (x_start, x_stop, y_start, y_stop):
+            errors.append(f"ROI {roi_index}: one or more coordinate values are invalid")
+            plan["num_x"] = 0
+            plan["num_y"] = 0
+            plan["estimated_s"] = 0.0
+            plan["within_limits"] = False
+            plan["range_status"] = "Invalid value"
+            return plan, errors
+
+        span_x_um = abs(x_stop - x_start)
+        span_y_um = abs(y_stop - y_start)
+        plan["num_x"] = max(2, round(span_x_um / max(step_um, 1e-12)) + 1)
+        plan["num_y"] = max(2, round(span_y_um / max(step_um, 1e-12)) + 1)
+        plan["estimated_s"] = plan["num_x"] * plan["num_y"] * dwell_s
+        plan["within_limits"] = _plan_within_scanner_limits(plan)
+        plan["range_status"] = _plan_range_status(plan)
+        return plan, errors
+
+    def _refresh_plan_row(self, row: int) -> None:
+        if row < 0 or row >= self.plan_table.rowCount():
+            return
+
+        plan, errors = self._plan_from_row(row)
+        status_text = "; ".join(errors) if errors else plan["range_status"]
+        is_valid = plan.get("within_limits", False) and not errors
+        blocker = QtCore.QSignalBlocker(self.plan_table)
+        try:
+            points_item = self.plan_table.item(row, 6)
+            if points_item is not None:
+                points_item.setText(f'{plan["num_x"]}, {plan["num_y"]}' if not errors else "—")
+            time_item = self.plan_table.item(row, 7)
+            if time_item is not None:
+                time_item.setText(f'{plan["estimated_s"]/60:.1f} min' if not errors else "—")
+            status_item = self.plan_table.item(row, 8)
+            if status_item is not None:
+                status_item.setText(status_text)
+                status_item.setBackground(QtGui.QColor("#1f7a1f") if is_valid else QtGui.QColor("#8a1f11"))
+                status_item.setForeground(QtGui.QColor("white"))
+        finally:
+            del blocker
+        self._update_send_button_state()
+
+    def _refresh_plan_table(self) -> None:
+        for row in range(self.plan_table.rowCount()):
+            self._refresh_plan_row(row)
+
+    def _update_send_button_state(self) -> None:
+        has_selected = False
+        for row in range(self.plan_table.rowCount()):
+            item = self.plan_table.item(row, 0)
+            if item is not None and item.checkState() == QtCore.Qt.CheckState.Checked:
+                has_selected = True
+                break
+        self.send_button.setEnabled(self.scan is not None and has_selected)
+
+    def _on_plan_table_item_changed(self, item: QtWidgets.QTableWidgetItem):
+        if item is None:
+            return
+        if item.column() == 0:
+            self._update_send_button_state()
+            return
+        if item.column() in {2, 3, 4, 5}:
+            self._refresh_plan_row(item.row())
+
     def load_data(self):
         try:
             raw_value = self.scan_number.text().strip()
@@ -350,6 +526,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
                 raise ValueError("Scan number must be an integer.")
             self.scan_input = raw_value
             self.scan = load_xrf_data_for_scan(raw_value)
+            self.plans = []
             if self.scan.stack.ndim != 3 or self.scan.stack.shape[0] != len(self.scan.element_names):
                 raise ValueError("Expected XRF stack shape (n_elements, y, x) and matching names.")
             self.x_axis.set_scan_geometry(self.scan.pixel_size_um, self.scan.origin_um)
@@ -390,6 +567,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         for roi in self.rois.copy():
             self.view_box.removeItem(roi)
         self.rois.clear()
+        self.plans = []
         self.plan_table.setRowCount(0)
         self.send_button.setEnabled(False)
 
@@ -428,6 +606,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         if self.scan is None or not self.rois:
             self.statusBar().showMessage("Load data and select at least one ROI.")
             return
+        preserved_selection = self._plan_selection_states()
         self.plans = []
         px, py = self.scan.pixel_size_um; ox, oy = self.scan.origin_um
         padding_fraction = self.padding_pct.value() / 100.0
@@ -445,31 +624,80 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
             plan["num_x"] = max(2, round((plan["x_stop_um"]-plan["x_start_um"])/plan["step_um"])+1)
             plan["num_y"] = max(2, round((plan["y_stop_um"]-plan["y_start_um"])/plan["step_um"])+1)
             plan["estimated_s"] = plan["num_x"]*plan["num_y"]*plan["dwell_s"]
+            plan["selected"] = preserved_selection[i - 1] if i - 1 < len(preserved_selection) else True
+            plan["within_limits"] = _plan_within_scanner_limits(plan)
+            plan["range_status"] = _plan_range_status(plan)
             self.plans.append(plan)
-        self._show_plans(); self.send_button.setEnabled(True)
-        self.statusBar().showMessage(f"Generated {len(self.plans)} scan plan(s).")
+        self._show_plans()
+        invalid_count = sum(1 for plan in self.plans if not plan["within_limits"])
+        if invalid_count:
+            self.statusBar().showMessage(
+                f"Generated {len(self.plans)} scan plan(s); {invalid_count} exceed the ±{SCANNER_RANGE_LIMIT_UM:.0f} µm scanner limit."
+            )
+        else:
+            self.statusBar().showMessage(f"Generated {len(self.plans)} scan plan(s).")
 
     def _show_plans(self):
-        self.plan_table.setRowCount(len(self.plans))
-        for row, p in enumerate(self.plans):
-            values = [p["roi"], f'{p["x_start_um"]:.3f} µm', f'{p["x_stop_um"]:.3f} µm',
-                      f'{p["y_start_um"]:.3f} µm', f'{p["y_stop_um"]:.3f} µm',
-                      f'{p["num_x"]}, {p["num_y"]}', f'{p["estimated_s"]/60:.1f} min']
-            for col, value in enumerate(values): self.plan_table.setItem(row, col, QtWidgets.QTableWidgetItem(str(value)))
+        blocker = QtCore.QSignalBlocker(self.plan_table)
+        try:
+            self.plan_table.setRowCount(len(self.plans))
+            for row, plan in enumerate(self.plans):
+                self.plan_table.setItem(row, 0, self._make_plan_item("", checkable=True, checked=plan.get("selected", True)))
+                self.plan_table.setItem(row, 1, self._make_plan_item(str(plan["roi"])))
+                self.plan_table.setItem(row, 2, self._make_plan_item(f'{plan["x_start_um"]:.3f}', editable=True))
+                self.plan_table.setItem(row, 3, self._make_plan_item(f'{plan["x_stop_um"]:.3f}', editable=True))
+                self.plan_table.setItem(row, 4, self._make_plan_item(f'{plan["y_start_um"]:.3f}', editable=True))
+                self.plan_table.setItem(row, 5, self._make_plan_item(f'{plan["y_stop_um"]:.3f}', editable=True))
+                self.plan_table.setItem(row, 6, self._make_plan_item(f'{plan["num_x"]}, {plan["num_y"]}'))
+                self.plan_table.setItem(row, 7, self._make_plan_item(f'{plan["estimated_s"]/60:.1f} min'))
+                status_item = self._make_plan_item(plan.get("range_status", _plan_range_status(plan)))
+                status_item.setBackground(QtGui.QColor("#1f7a1f") if plan.get("within_limits", False) else QtGui.QColor("#8a1f11"))
+                status_item.setForeground(QtGui.QColor("white"))
+                self.plan_table.setItem(row, 8, status_item)
+        finally:
+            del blocker
+        self._update_send_button_state()
+        self._refresh_plan_table()
 
     def send_plans(self):
+        plans: list[dict] = []
+        invalid_messages: list[str] = []
+        for row in range(self.plan_table.rowCount()):
+            plan, errors = self._plan_from_row(row)
+            if not plan["selected"]:
+                continue
+            if errors:
+                invalid_messages.extend(errors)
+                continue
+            if not plan["within_limits"]:
+                invalid_messages.append(f"ROI {plan['roi']}: exceeds the ±{SCANNER_RANGE_LIMIT_UM:.0f} µm scanner limit")
+                continue
+            plans.append(plan)
+
+        if invalid_messages:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Cannot send selected scans",
+                "\n".join(invalid_messages),
+            )
+            self.statusBar().showMessage("Selected scan plan(s) were not sent.")
+            return
+
+        if not plans:
+            self.statusBar().showMessage("No selected scan plans to send.")
+            return
 
         try:
             chosen = self.detector_system.currentText()
             dets = DETECTOR_PRESETS.get(chosen, [])
             send_scan_plans(
-                self.plans,
+                plans,
                 sid=self.scan_input if hasattr(self, "scan_input") else None,
                 dets=dets,
                 mot1="zpssx",
                 mot2="zpssy",
             )
-            self.statusBar().showMessage(f"Submitted {len(self.plans)} plan(s).")
+            self.statusBar().showMessage(f"Submitted {len(plans)} plan(s).")
         except Exception:
             import traceback
             QtWidgets.QMessageBox.critical(
