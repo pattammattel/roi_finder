@@ -8,6 +8,7 @@ license = { text = "MIT" }
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "numpy>=1.24",
+    "tifffile>=2024.8.30",
     "PyQt6",
     "pyqtgraph>=0.13.4",
     "hxntools>=0.6.5,<0.7",
