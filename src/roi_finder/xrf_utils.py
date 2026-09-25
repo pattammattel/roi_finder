@@ -29,6 +29,24 @@ def get_flyscan_dimensions(hdr):
     else:
         raise ValueError("Unknown scan type for get_flyscan_dimensions")
 
+def get_real_scan_geometry(hdr):
+    """Return ((x_step, y_step), (origin_x, origin_y)) in microns from real readback positions.
+
+    Uses the measured motor positions instead of the nominal scan_input so the
+    image coordinates match where the scan actually happened.
+    """
+    x_pos, y_pos = get_scan_positions(hdr)
+    x_pos = np.asarray(x_pos, dtype=float)
+    y_pos = np.asarray(y_pos, dtype=float)
+    scan_dim = get_flyscan_dimensions(hdr)
+    x_grid = x_pos.reshape(scan_dim)
+    y_grid = y_pos.reshape(scan_dim)
+    origin_x = float(x_grid[0, 0])
+    origin_y = float(y_grid[0, 0])
+    x_step = float(np.mean(np.diff(x_grid, axis=1))) if x_grid.shape[1] > 1 else 0.0
+    y_step = float(np.mean(np.diff(y_grid, axis=0))) if y_grid.shape[0] > 1 else 0.0
+    return (x_step, y_step), (origin_x, origin_y)
+
 def get_all_scalar_data(hdr):
 
     keys = list(hdr.table().keys())
