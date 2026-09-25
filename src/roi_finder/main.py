@@ -20,7 +20,7 @@ from hxntools.CompositeBroker import db
 from hxntools.scan_info import get_scan_positions
 
 from qserver_utils import send_fly2d_recover_and_scan
-from xrf_utils import get_all_xrf_roi_data, get_scan_details
+from xrf_utils import get_all_xrf_roi_data, get_real_scan_geometry
 
 
 
@@ -118,35 +118,6 @@ def _make_phantom_xrf_scan() -> XRFScan:
             image += 90 * np.exp(-((x-cx)**2 + (y-cy)**2) / (2 * width**2))
         stack.append(np.clip(image, 0, None))
     return XRFScan(np.asarray(stack), ["Fe_K", "Cr_K", "Mn_K"])
-
-
-def _get_scan_geometry(details: dict) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Derive (pixel_size_um, origin_um) from the real scan metadata."""
-    scan_cfg = details.get("scan") if isinstance(details.get("scan"), dict) else {}
-    scan_input = scan_cfg.get("scan_input")
-    shape = scan_cfg.get("shape") or details.get("shape")
-
-    if isinstance(scan_input, (list, tuple)) and len(scan_input) >= 6:
-        start1 = float(scan_input[0]); end1 = float(scan_input[1]); num1 = int(scan_input[2])
-        start2 = float(scan_input[3]); end2 = float(scan_input[4]); num2 = int(scan_input[5])
-        if isinstance(shape, (list, tuple)) and len(shape) >= 2:
-            num1 = int(shape[0]) if int(shape[0]) > 0 else num1
-            num2 = int(shape[1]) if int(shape[1]) > 0 else num2
-        x_step = (end1 - start1) / max(num1 - 1, 1)
-        y_step = (end2 - start2) / max(num2 - 1, 1)
-        return (x_step, y_step), (start1, start2)
-
-    if not all(key in details for key in ("scan_start1", "scan_end1", "num1")):
-        return (0.25, 0.25), (0.0, 0.0)
-
-    x_step = (details["scan_end1"] - details["scan_start1"]) / max(int(details["num1"]) - 1, 1)
-    origin_x = details["scan_start1"]
-    if all(key in details for key in ("scan_start2", "scan_end2", "num2")):
-        y_step = (details["scan_end2"] - details["scan_start2"]) / max(int(details["num2"]) - 1, 1)
-        origin_y = details["scan_start2"]
-    else:
-        y_step, origin_y = x_step, origin_x
-    return (x_step, y_step), (origin_x, origin_y)
 
 
 def _roi_padding_um(roi_size_px: tuple[float, float], pixel_size_um: tuple[float, float], padding_fraction: float) -> tuple[float, float]:
@@ -256,7 +227,7 @@ def load_xrf_data_for_scan(scan_number: str) -> XRFScan:
         print(f"Attempting to load scan {scan_number!r}...")
         hdr = db[int(scan_number)]
         xrf_stack, element_names = get_all_xrf_roi_data(hdr)
-        pixel_size_um, origin_um = _get_scan_geometry(get_scan_details(hdr))
+        pixel_size_um, origin_um = get_real_scan_geometry(hdr)
         return XRFScan(xrf_stack, element_names, pixel_size_um, origin_um)
 
 def send_scan_plans(plans: list[dict], sid: str | int | None = None,
@@ -609,6 +580,20 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         selection_note.setWordWrap(True)
         selection_layout.addWidget(selection_note)
         form.addWidget(selection)
+        form.addStretch(1)
+        layout.addWidget(controls_scroll)
+
+        right_controls = QtWidgets.QWidget()
+        right_form = QtWidgets.QVBoxLayout(right_controls)
+        right_form.setSpacing(10)
+        right_form.setContentsMargins(2, 2, 8, 2)
+        right_controls_scroll = QtWidgets.QScrollArea()
+        right_controls_scroll.setWidget(right_controls)
+        right_controls_scroll.setWidgetResizable(True)
+        right_controls_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        right_controls_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        right_controls_scroll.setMinimumWidth(300)
+        right_controls_scroll.setMaximumWidth(360)
 
         parameters = QtWidgets.QGroupBox("Fine-scan parameters")
         params = QtWidgets.QVBoxLayout(parameters)
@@ -629,7 +614,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.step_um.valueChanged.connect(self._on_scan_param_changed)
         self.dwell_s.valueChanged.connect(self._on_scan_param_changed)
         self.padding_pct.valueChanged.connect(self._on_scan_param_changed)
-        form.addWidget(parameters)
+        right_form.addWidget(parameters)
 
         self.generate_button = QtWidgets.QPushButton("Generate scan plans")
         self.generate_button.clicked.connect(self.generate_plans)
@@ -638,9 +623,9 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.send_button = QtWidgets.QPushButton("Send scans")
         self.send_button.clicked.connect(self.send_plans)
         self.send_button.setEnabled(False)
-        form.addWidget(self.generate_button)
-        form.addWidget(self.update_button)
-        form.addWidget(self.send_button)
+        right_form.addWidget(self.generate_button)
+        right_form.addWidget(self.update_button)
+        right_form.addWidget(self.send_button)
 
         info_group = QtWidgets.QGroupBox("Scan info")
         info_layout = QtWidgets.QVBoxLayout(info_group)
@@ -649,9 +634,8 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         self.scan_info_box.setMinimumHeight(120)
         self.scan_info_box.setPlainText("No scan loaded.\nLoad a beamline scan or import external images with manual geometry.")
         info_layout.addWidget(self.scan_info_box)
-        form.addWidget(info_group)
-        form.addStretch(1)
-        layout.addWidget(controls_scroll)
+        right_form.addWidget(info_group)
+        right_form.addStretch(1)
 
         right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         image_box = QtWidgets.QWidget(); image_layout = QtWidgets.QVBoxLayout(image_box)
@@ -701,6 +685,7 @@ class ROIScanPlanner(QtWidgets.QMainWindow):
         right.addWidget(plan_box)
         right.setSizes([620, 220])
         layout.addWidget(right, stretch=1)
+        layout.addWidget(right_controls_scroll)
 
     def _update_hover_coordinates(self, pos):
         if self.scan is None:
